@@ -261,3 +261,66 @@ class TestPCR:
     def test_pcr_empty_returns_none(self):
         from deribit import compute_pcr
         assert compute_pcr([]) is None
+
+
+class TestDVOL:
+    def test_parse_dvol_candles(self):
+        from deribit import parse_dvol
+        candles = [[1000, 50.0, 52.0, 49.0, 51.0], [2000, 51.0, 53.0, 50.0, 52.0]]
+        dvol, change = parse_dvol(candles)
+        assert dvol == 52.0
+        assert change == pytest.approx(1.0)
+
+    def test_parse_dvol_single_candle(self):
+        from deribit import parse_dvol
+        dvol, change = parse_dvol([[1000, 50.0, 52.0, 49.0, 51.0]])
+        assert dvol == 51.0
+        assert change == 0.0
+
+    def test_parse_dvol_empty(self):
+        from deribit import parse_dvol
+        dvol, change = parse_dvol([])
+        assert dvol is None
+
+    def test_dvol_modifier_calm(self):
+        from deribit import compute_dvol_modifier
+        assert compute_dvol_modifier(40) == 1.0
+
+    def test_dvol_modifier_extreme(self):
+        from deribit import compute_dvol_modifier
+        assert compute_dvol_modifier(70) == 0.50
+
+class TestTermStructureRatio:
+    def test_two_expiries_contango(self):
+        from deribit import compute_ts_ratio
+        options = [
+            {"option_type": "C", "_delta": 0.50, "iv_decimal": 0.55, "T": 30/365},
+            {"option_type": "C", "_delta": 0.51, "iv_decimal": 0.60, "T": 60/365},
+        ]
+        ratio = compute_ts_ratio(options)
+        assert ratio is not None
+        assert ratio < 1.0
+
+    def test_single_expiry_returns_none(self):
+        from deribit import compute_ts_ratio
+        options = [
+            {"option_type": "C", "_delta": 0.50, "iv_decimal": 0.55, "T": 30/365},
+        ]
+        assert compute_ts_ratio(options) is None
+
+    def test_empty_returns_none(self):
+        from deribit import compute_ts_ratio
+        assert compute_ts_ratio([]) is None
+
+class TestTermStructureModifier:
+    def test_contango(self):
+        from deribit import compute_ts_modifier
+        assert compute_ts_modifier(0.90) == 1.0
+
+    def test_backwardation(self):
+        from deribit import compute_ts_modifier
+        assert compute_ts_modifier(1.20) == 0.50
+
+    def test_none_ratio(self):
+        from deribit import compute_ts_modifier
+        assert compute_ts_modifier(None) == 0.75

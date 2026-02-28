@@ -201,6 +201,63 @@ def compute_pcr(
     return round(put_notional / call_notional, 4)
 
 
+def parse_dvol(candles: list[list]) -> tuple[float | None, float]:
+    if not candles:
+        return None, 0.0
+    last_close = candles[-1][4]
+    first_close = candles[0][4]
+    return last_close, last_close - first_close if len(candles) > 1 else 0.0
+
+def compute_dvol_modifier(dvol: float | None) -> float:
+    """Regime modifier from DVOL level."""
+    if dvol is None:
+        return 0.75
+    if dvol <= 45:
+        return 1.0
+    if dvol <= 55:
+        return 0.85
+    if dvol <= 65:
+        return 0.70
+    return 0.50
+
+def compute_ts_ratio(enriched: list[dict]) -> float | None:
+    """Compute front/back ATM IV ratio from enriched options."""
+    if not enriched:
+        return None
+    by_t: dict[float, list[dict]] = {}
+    for o in enriched:
+        by_t.setdefault(round(o["T"], 6), []).append(o)
+    if len(by_t) < 2:
+        return None
+    sorted_ts = sorted(by_t.keys())
+    front_t, back_t = sorted_ts[0], sorted_ts[1]
+
+    def atm_iv(opts: list[dict]) -> float | None:
+        calls = [o for o in opts if o["option_type"] == "C"]
+        if not calls:
+            return None
+        nearest = min(calls, key=lambda o: abs(o["_delta"] - 0.50))
+        return nearest["iv_decimal"]
+
+    front_iv = atm_iv(by_t[front_t])
+    back_iv = atm_iv(by_t[back_t])
+    if front_iv is None or back_iv is None or back_iv == 0:
+        return None
+    return round(front_iv / back_iv, 4)
+
+def compute_ts_modifier(ts_ratio: float | None) -> float:
+    """Regime modifier from term structure ratio."""
+    if ts_ratio is None:
+        return 0.75
+    if ts_ratio <= 0.95:
+        return 1.0
+    if ts_ratio <= 1.05:
+        return 0.85
+    if ts_ratio <= 1.15:
+        return 0.70
+    return 0.50
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

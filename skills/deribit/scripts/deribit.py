@@ -333,8 +333,77 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main() -> None:
-    ErrorOutput(error="not implemented").emit()
+def process_asset(asset: str, cache_dir: Path, no_cache: bool = False) -> dict:
+    """Full pipeline for one asset. Returns dict ready for SignalOutput(**result)."""
+    cache_path = cache_dir / f"snapshot_{asset.lower()}.json"
+
+    try:
+        instruments = _fetch_deribit("/public/get_instruments", {"currency": asset, "kind": "option"})
+        book_entries = _fetch_deribit("/public/get_book_summary_by_currency", {"currency": asset, "kind": "option"})
+        dvol_raw = _fetch_deribit("/public/get_volatility_index_data", {"currency": asset, "resolution": 3600, "start_timestamp": int((time.time() - 7*86400)*1000), "end_timestamp": int(time.time()*1000)})
+        data_quality = 1.0
+        if not no_cache:
+            _save_cache({"instruments": instruments, "book": book_entries, "dvol": dvol_raw}, path=cache_path)
+    except ConnectionError:
+        if no_cache:
+            raise
+        cached, cache_ts = _load_cache(path=cache_path)
+        if cached is None:
+            raise
+        instruments = cached["instruments"]
+        book_entries = cached["book"]
+        dvol_raw = cached["dvol"]
+        data_quality = _freshness_factor(cache_ts)
+
+    options = _filter_options(book_entries, instruments)
+    if not options:
+        raise ValueError(f"No valid options for {asset}")
+    enriched = enrich_with_deltas(options)
+
+    call_25d_iv, call_interp = _find_25d_iv(enriched, target_delta=0.25, option_type="C")
+    put_25d_iv, put_interp = _find_25d_iv(enriched, target_delta=0.25, option_type="P")
+    rr25 = compute_rr25(call_25d_iv, put_25d_iv)
+    pcr = compute_pcr(enriched)
+    dvol, dvol_change = parse_dvol(dvol_raw.get("data", []) if isinstance(dvol_raw, dict) else dvol_raw)
+    ts_ratio = compute_ts_ratio(enriched)
+
+    skew_score = compute_skew_score(rr25)
+    pcr_score = compute_pcr_score(pcr)
+    direction = compute_direction(skew_score, pcr_score)
+    signal = classify_signal(direction)
+
+    dvol_mod = compute_dvol_modifier(dvol)
+    ts_mod = compute_ts_modifier(ts_ratio)
+
+    strength = abs(direction)
+    agreement = 1.0 if (pcr_score is not None and (direction * pcr_score > 0)) else 0.5
+    liquidity = min(1.0, sum(o["oi"] for o in enriched) / 10000)
+
+    confidence = compute_confidence(strength, agreement, data_quality, liquidity, dvol_mod, ts_mod)
+
+    reasoning = f"{asset} RR25={rr25}, PCR={pcr}, DVOL={dvol} → {signal}"
+    return {
+        "signal": signal,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "data": {"asset": asset, "rr25": rr25, "pcr": pcr, "dvol": dvol, "dvol_change": dvol_change, "ts_ratio": ts_ratio},
+        "analytics": {"skew_score": round(skew_score, 4), "pcr_score": round(pcr_score, 4) if pcr_score is not None else None, "direction": round(direction, 4), "dvol_mod": dvol_mod, "ts_mod": ts_mod, "data_quality": data_quality},
+    }
+
+def main():
+    args = build_parser().parse_args()
+    assets = ["BTC", "ETH"] if args.asset == "both" else [args.asset.upper()]
+
+    successes = 0
+    for asset in assets:
+        try:
+            result = process_asset(asset, cache_dir=args.cache_dir or CACHE_DIR, no_cache=args.no_cache)
+            SignalOutput(**result).emit()
+            successes += 1
+        except Exception as e:
+            ErrorOutput(error=f"{asset}: {e}").emit(exit=False)
+
+    sys.exit(0 if successes > 0 else 1)
 
 if __name__ == "__main__":
     main()

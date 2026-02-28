@@ -437,3 +437,160 @@ class TestCLI:
         from deribit import build_parser
         args = build_parser().parse_args(["--asset", "both"])
         assert args.asset == "both"
+
+
+# --- E2E test helpers (Task 11) ---
+# IMPORTANT: Named _e2e_* to avoid collision with Task 3's bytes-based _mock_urlopen/_make_jsonrpc_response
+
+def _make_realistic_instruments():
+    """~20 instruments across 2 expiries x 5 strikes x 2 types (C/P)."""
+    now_ms = int(time.time() * 1000)
+    exp_30d = now_ms + 30 * 86400 * 1000
+    exp_60d = now_ms + 60 * 86400 * 1000
+    strikes = [40000, 45000, 50000, 55000, 60000]
+    instruments = []
+    for exp, label in [(exp_30d, "28MAR26"), (exp_60d, "27APR26")]:
+        for strike in strikes:
+            for otype in ["C", "P"]:
+                instruments.append({
+                    "instrument_name": f"BTC-{label}-{strike}-{otype}",
+                    "expiration_timestamp": exp,
+                    "strike": float(strike),
+                    "contract_size": 1.0,
+                })
+    return instruments
+
+def _make_realistic_book_summary():
+    """Book summary entries matching _make_realistic_instruments()."""
+    now_ms = int(time.time() * 1000)
+    exp_30d = now_ms + 30 * 86400 * 1000
+    exp_60d = now_ms + 60 * 86400 * 1000
+    strikes = [40000, 45000, 50000, 55000, 60000]
+    iv_map = {40000: 72, 45000: 58, 50000: 52, 55000: 56, 60000: 68}
+    entries = []
+    for exp, label in [(exp_30d, "28MAR26"), (exp_60d, "27APR26")]:
+        for strike in strikes:
+            base_iv = iv_map[strike]
+            for otype in ["C", "P"]:
+                iv = base_iv + (3 if otype == "P" else 0)
+                oi = 500 if strike == 50000 else 200
+                entries.append({
+                    "instrument_name": f"BTC-{label}-{strike}-{otype}",
+                    "mark_iv": float(iv),
+                    "open_interest": float(oi),
+                    "underlying_price": 50000.0,
+                    "creation_timestamp": now_ms,
+                })
+    return entries
+
+def _make_realistic_dvol():
+    """DVOL candle data: 7 daily candles, format [ts, open, high, low, close]."""
+    now_ms = int(time.time() * 1000)
+    candles = []
+    base_dvol = 50.0
+    for i in range(7):
+        ts = now_ms - (7 - i) * 86400 * 1000
+        open_v = base_dvol + i * 0.5
+        close_v = open_v + 1.0
+        candles.append([ts, open_v, open_v + 2.0, open_v - 1.0, close_v])
+    return candles
+
+def _e2e_jsonrpc_response(result):
+    """Wrap result in Deribit JSON-RPC envelope (dict, for E2E tests)."""
+    return {"jsonrpc": "2.0", "result": result, "id": 1}
+
+def _e2e_mock_urlopen(response_dict):
+    """Create a BytesIO mock urlopen return value from a dict (for E2E tests)."""
+    import io
+    body = json.dumps(response_dict).encode("utf-8")
+    return io.BytesIO(body)
+
+
+class TestEndToEnd:
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_btc_produces_signal(self, mock_urlopen_fn, mock_sleep, tmp_path, capsys, monkeypatch):
+        """main() with mocked API produces valid signal/v1 JSON."""
+        monkeypatch.setattr("deribit.CACHE_DIR", tmp_path)
+
+        instruments = _make_realistic_instruments()
+        book_summary = _make_realistic_book_summary()
+        dvol_data = _make_realistic_dvol()
+
+        responses = iter([
+            _e2e_mock_urlopen(_e2e_jsonrpc_response(instruments)),
+            _e2e_mock_urlopen(_e2e_jsonrpc_response(book_summary)),
+            _e2e_mock_urlopen(_e2e_jsonrpc_response({"data": dvol_data, "continuation": 0})),
+        ])
+        mock_urlopen_fn.side_effect = lambda *a, **kw: next(responses)
+
+        sys.argv = ["deribit", "--asset", "BTC"]
+        from deribit import main
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+
+        out = capsys.readouterr().out.strip()
+        result = json.loads(out)
+        assert result["schema"] == "signal/v1"
+        assert result["signal"] in ("bullish", "bearish", "neutral")
+        assert 15 <= result["confidence"] <= 100
+        assert "asset" in result["data"]
+        assert result["data"]["asset"] == "BTC"
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_api_error_falls_back_to_cache(self, mock_urlopen_fn, mock_sleep, tmp_path, capsys, monkeypatch):
+        """When API fails, should fall back to cached data."""
+        monkeypatch.setattr("deribit.CACHE_DIR", tmp_path)
+
+        from deribit import _save_cache
+        _save_cache({
+            "instruments": _make_realistic_instruments(),
+            "book": _make_realistic_book_summary(),
+            "dvol": {"data": _make_realistic_dvol(), "continuation": 0},
+        }, path=tmp_path / "snapshot_btc.json")
+
+        mock_urlopen_fn.side_effect = urllib.error.URLError("offline")
+
+        sys.argv = ["deribit", "--asset", "BTC"]
+        from deribit import main
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+
+        out = capsys.readouterr().out.strip()
+        result = json.loads(out)
+        assert result["schema"] == "signal/v1"
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_asset_both_partial_failure(self, mock_urlopen_fn, mock_sleep, tmp_path, capsys, monkeypatch):
+        """If BTC fails but ETH succeeds, emit error for BTC + signal for ETH, exit 0."""
+        monkeypatch.setattr("deribit.CACHE_DIR", tmp_path)
+
+        eth_instruments = _make_realistic_instruments()
+        eth_book = _make_realistic_book_summary()
+        eth_dvol = {"data": _make_realistic_dvol(), "continuation": 0}
+        _eth_responses = [eth_instruments, eth_book, eth_dvol]
+
+        call_count = 0
+        def side_effect(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:
+                raise urllib.error.URLError("BTC offline")
+            return _e2e_mock_urlopen(_e2e_jsonrpc_response(_eth_responses[call_count - 4]))
+
+        mock_urlopen_fn.side_effect = side_effect
+        sys.argv = ["deribit", "--asset", "both"]
+        from deribit import main
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+
+        out = capsys.readouterr().out.strip()
+        lines = [json.loads(line) for line in out.split("\n") if line.strip()]
+        schemas = [l["schema"] for l in lines]
+        assert "error/v1" in schemas
+        assert "signal/v1" in schemas

@@ -295,6 +295,32 @@ def compute_confidence(
     return max(15, min(100, round(15 + 85 * raw)))
 
 
+CACHE_DIR = Path.home() / ".cache" / "oracle" / "deribit"
+
+def _save_cache(data: Any, path: Path | None = None) -> None:
+    p = path or CACHE_DIR / "default.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"data": data, "ts": time.time()}, ensure_ascii=False))
+    os.replace(str(tmp), str(p))
+
+def _load_cache(path: Path | None = None) -> tuple[Any, float]:
+    p = path or CACHE_DIR / "default.json"
+    try:
+        payload = json.loads(p.read_text())
+        return payload["data"], payload["ts"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        return None, 0
+
+def _freshness_factor(cache_ts: float) -> float:
+    age = time.time() - cache_ts
+    if age <= 300:       return 1.0
+    if age <= 3600:      return 0.7
+    if age <= 21600:     return 0.4
+    if age <= 86400:     return 0.25
+    return 0.15
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

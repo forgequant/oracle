@@ -392,3 +392,35 @@ class TestConfidence:
         c = compute_confidence(strength=1.0, agreement=1.0, data_quality=1.0,
                                liquidity=1.0, dvol_mod=0.5, ts_mod=0.5)
         assert c >= 40
+
+
+class TestCache:
+    def test_save_and_load(self, tmp_path):
+        from deribit import _save_cache, _load_cache
+        path = tmp_path / "test.json"
+        _save_cache({"hello": "world"}, path=path)
+        data, ts = _load_cache(path=path)
+        assert data == {"hello": "world"}
+        assert ts > 0
+
+    def test_load_missing_file(self, tmp_path):
+        from deribit import _load_cache
+        data, ts = _load_cache(path=tmp_path / "nope.json")
+        assert data is None
+        assert ts == 0
+
+    def test_freshness_tiers(self):
+        from deribit import _freshness_factor
+        now = time.time()
+        assert _freshness_factor(now - 60) == 1.0
+        assert _freshness_factor(now - 1800) == 0.7
+        assert _freshness_factor(now - 7200) == 0.4
+        assert _freshness_factor(now - 43200) == 0.25
+        assert _freshness_factor(now - 100000) == 0.15
+
+    def test_atomic_write(self, tmp_path):
+        from deribit import _save_cache
+        path = tmp_path / "atomic.json"
+        _save_cache({"a": 1}, path=path)
+        assert not (path.with_suffix(".tmp")).exists()
+        assert path.exists()

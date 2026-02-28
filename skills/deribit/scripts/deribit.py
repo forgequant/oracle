@@ -55,6 +55,11 @@ class ErrorOutput:
         if exit:
             sys.exit(1)
 
+BASE_URL = "https://deribit.com/api/v2"
+MAX_RETRIES = 2
+TIMEOUT_S = 10
+
+
 def norm_cdf(x: float) -> float:
     """Cumulative normal distribution via erf approx (A&S 7.1.26). Error < 7.5e-8."""
     if x < -8.0:
@@ -77,6 +82,25 @@ def black76_delta(F: float, K: float, T: float, iv: float) -> float:
         raise ValueError(f"iv must be positive, got {iv}")
     d1 = (math.log(F / K) + 0.5 * iv**2 * T) / (iv * math.sqrt(T))
     return norm_cdf(d1)
+
+def _fetch_deribit(method: str, params: dict[str, Any] | None = None) -> Any:
+    """Fetch from Deribit public API with retry. Returns result from JSON-RPC."""
+    qs = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+    url = f"{BASE_URL}{method}" + (f"?{qs}" if qs else "")
+    last_err: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=TIMEOUT_S) as resp:
+                body = json.loads(resp.read())
+            if "error" in body:
+                raise ConnectionError(f"Deribit API error: {body['error'].get('message', body['error'])}")
+            return body["result"]
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+            last_err = e
+            if attempt < MAX_RETRIES:
+                time.sleep(min(4, 0.3 * 2**attempt + random.uniform(0, 0.1)))
+    raise ConnectionError(f"Deribit API failed after {MAX_RETRIES + 1} attempts: {last_err}")
+
 
 def main() -> None:
     ErrorOutput(error="not implemented").emit()

@@ -71,3 +71,46 @@ class TestBlack76Delta:
     def test_zero_iv_raises(self):
         with pytest.raises(ValueError):
             black76_delta(F=50000, K=50000, T=30/365, iv=0)
+
+
+def _make_jsonrpc_response(result: Any) -> bytes:
+    """Build fake Deribit JSON-RPC response."""
+    return json.dumps({"jsonrpc": "2.0", "result": result}).encode()
+
+def _make_jsonrpc_error(code: int, message: str) -> bytes:
+    return json.dumps({"jsonrpc": "2.0", "error": {"code": code, "message": message}}).encode()
+
+def _mock_urlopen(data: bytes):
+    """Create a mock urlopen return value."""
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = data
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
+class TestFetch:
+    @patch("urllib.request.urlopen")
+    def test_fetch_parses_jsonrpc_result(self, mock_urlopen_fn):
+        mock_urlopen_fn.return_value = _mock_urlopen(_make_jsonrpc_response([{"a": 1}]))
+        from deribit import _fetch_deribit
+        result = _fetch_deribit("/public/get_instruments", {"currency": "BTC"})
+        assert result == [{"a": 1}]
+
+    @patch("urllib.request.urlopen")
+    def test_fetch_raises_on_jsonrpc_error(self, mock_urlopen_fn):
+        mock_urlopen_fn.return_value = _mock_urlopen(_make_jsonrpc_error(10000, "bad request"))
+        from deribit import _fetch_deribit
+        with pytest.raises(ConnectionError, match="bad request"):
+            _fetch_deribit("/public/test", {})
+
+    @patch("urllib.request.urlopen")
+    def test_fetch_retries_on_network_error(self, mock_urlopen_fn):
+        mock_urlopen_fn.side_effect = [
+            urllib.error.URLError("timeout"),
+            _mock_urlopen(_make_jsonrpc_response({"ok": True})),
+        ]
+        from deribit import _fetch_deribit
+        result = _fetch_deribit("/public/test", {})
+        assert result == {"ok": True}
+        assert mock_urlopen_fn.call_count == 2

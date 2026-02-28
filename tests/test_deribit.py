@@ -114,3 +114,65 @@ class TestFetch:
         result = _fetch_deribit("/public/test", {})
         assert result == {"ok": True}
         assert mock_urlopen_fn.call_count == 2
+
+
+def _make_instrument(name: str, expiry_ts: int, strike: float, contract_size: float = 1.0) -> dict:
+    return {
+        "instrument_name": name,
+        "expiration_timestamp": expiry_ts,
+        "strike": strike,
+        "contract_size": contract_size,
+        "kind": "option",
+    }
+
+def _make_book_entry(name: str, mark_iv: float | None, oi: float, underlying: float) -> dict:
+    return {
+        "instrument_name": name,
+        "mark_iv": mark_iv,
+        "open_interest": oi,
+        "underlying_price": underlying,
+        "creation_timestamp": int(time.time() * 1000),
+    }
+
+
+class TestFiltering:
+    def test_exclude_null_mark_iv(self):
+        from deribit import _filter_options
+        entries = [_make_book_entry("BTC-28MAR26-50000-C", None, 100, 50000)]
+        instruments = [_make_instrument("BTC-28MAR26-50000-C", int((time.time() + 30*86400)*1000), 50000)]
+        result = _filter_options(entries, instruments)
+        assert len(result) == 0
+
+    def test_exclude_zero_mark_iv(self):
+        from deribit import _filter_options
+        entries = [_make_book_entry("BTC-28MAR26-50000-C", 0, 100, 50000)]
+        instruments = [_make_instrument("BTC-28MAR26-50000-C", int((time.time() + 30*86400)*1000), 50000)]
+        result = _filter_options(entries, instruments)
+        assert len(result) == 0
+
+    def test_exclude_short_expiry(self):
+        from deribit import _filter_options
+        expiry_ts = int((time.time() + 12*3600) * 1000)
+        entries = [_make_book_entry("BTC-TODAY-50000-C", 50.0, 100, 50000)]
+        instruments = [_make_instrument("BTC-TODAY-50000-C", expiry_ts, 50000)]
+        result = _filter_options(entries, instruments)
+        assert len(result) == 0
+
+    def test_exclude_long_expiry(self):
+        from deribit import _filter_options
+        expiry_ts = int((time.time() + 200*86400) * 1000)
+        entries = [_make_book_entry("BTC-FAR-50000-C", 50.0, 100, 50000)]
+        instruments = [_make_instrument("BTC-FAR-50000-C", expiry_ts, 50000)]
+        result = _filter_options(entries, instruments)
+        assert len(result) == 0
+
+    def test_keep_valid_entry(self):
+        from deribit import _filter_options
+        expiry_ts = int((time.time() + 30*86400) * 1000)
+        entries = [_make_book_entry("BTC-28MAR26-50000-C", 55.0, 100, 50000)]
+        instruments = [_make_instrument("BTC-28MAR26-50000-C", expiry_ts, 50000)]
+        result = _filter_options(entries, instruments)
+        assert len(result) == 1
+        assert result[0]["iv_decimal"] == pytest.approx(0.55)
+        assert result[0]["T"] > 0
+        assert result[0]["option_type"] in ("C", "P")

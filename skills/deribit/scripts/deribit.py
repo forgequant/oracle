@@ -102,6 +102,43 @@ def _fetch_deribit(method: str, params: dict[str, Any] | None = None) -> Any:
     raise ConnectionError(f"Deribit API failed after {MAX_RETRIES + 1} attempts: {last_err}")
 
 
+def _filter_options(
+    book_entries: list[dict],
+    instruments: list[dict],
+    min_t_days: float = 1.0,
+    max_t_days: float = 180.0,
+) -> list[dict]:
+    now = time.time()
+    inst_map = {i["instrument_name"]: i for i in instruments}
+    result = []
+    for entry in book_entries:
+        name = entry["instrument_name"]
+        iv_pct = entry.get("mark_iv")
+        if iv_pct is None or iv_pct <= 0:
+            continue
+        inst = inst_map.get(name)
+        if inst is None:
+            continue
+        expiry_s = inst["expiration_timestamp"] / 1000.0
+        t_days = (expiry_s - now) / 86400.0
+        if t_days < min_t_days or t_days > max_t_days:
+            continue
+        option_type = name.rsplit("-", 1)[-1]
+        if option_type not in ("C", "P"):
+            continue
+        result.append({
+            "name": name,
+            "iv_decimal": iv_pct / 100.0,
+            "T": t_days / 365.0,
+            "strike": inst["strike"],
+            "F": entry["underlying_price"],
+            "option_type": option_type,
+            "oi": entry["open_interest"],
+            "contract_size": inst.get("contract_size", 1.0),
+        })
+    return result
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

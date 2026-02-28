@@ -258,6 +258,43 @@ def compute_ts_modifier(ts_ratio: float | None) -> float:
     return 0.50
 
 
+def clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+def compute_skew_score(rr25: float | None) -> float:
+    if rr25 is None:
+        return 0.0
+    return clamp((rr25 + 4) / 8, -1, 1)
+
+def compute_pcr_score(pcr: float | None) -> float | None:
+    if pcr is None:
+        return None
+    return clamp((1.0 - pcr) / 0.5, -1, 1)
+
+def compute_direction(skew_score: float, pcr_score: float | None) -> float:
+    """Compute direction score. Renormalizes weights when PCR is missing."""
+    if pcr_score is None:
+        return skew_score
+    return 0.55 * skew_score + 0.45 * pcr_score
+
+def classify_signal(direction: float) -> str:
+    if direction >= 0.25:
+        return "bullish"
+    if direction <= -0.25:
+        return "bearish"
+    return "neutral"
+
+def compute_confidence(
+    strength: float, agreement: float, data_quality: float,
+    liquidity: float, dvol_mod: float, ts_mod: float,
+) -> int:
+    """Compute confidence score [15, 100]. Uses min() for regime modifiers."""
+    raw = 0.40 * strength + 0.25 * agreement + 0.25 * data_quality + 0.10 * liquidity
+    regime_mod = min(dvol_mod, ts_mod)
+    raw = raw * regime_mod
+    return max(15, min(100, round(15 + 85 * raw)))
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

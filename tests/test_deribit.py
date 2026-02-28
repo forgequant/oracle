@@ -324,3 +324,71 @@ class TestTermStructureModifier:
     def test_none_ratio(self):
         from deribit import compute_ts_modifier
         assert compute_ts_modifier(None) == 0.75
+
+
+class TestDirection:
+    def test_bullish(self):
+        from deribit import compute_direction, classify_signal
+        d = compute_direction(skew_score=0.5, pcr_score=0.4)
+        assert d > 0.25
+        assert classify_signal(d) == "bullish"
+
+    def test_bearish(self):
+        from deribit import compute_direction, classify_signal
+        d = compute_direction(skew_score=-0.6, pcr_score=-0.5)
+        assert d < -0.25
+        assert classify_signal(d) == "bearish"
+
+    def test_neutral(self):
+        from deribit import compute_direction, classify_signal
+        d = compute_direction(skew_score=0.1, pcr_score=-0.1)
+        assert -0.25 <= d <= 0.25
+        assert classify_signal(d) == "neutral"
+
+    def test_weights_sum_to_one(self):
+        assert 0.55 + 0.45 == pytest.approx(1.0)
+
+    def test_pcr_none_renormalizes(self):
+        from deribit import compute_direction, classify_signal
+        d = compute_direction(skew_score=0.20, pcr_score=None)
+        assert classify_signal(d) == "neutral"
+
+    def test_pcr_none_strong_skew_is_bullish(self):
+        from deribit import compute_direction, classify_signal
+        d = compute_direction(skew_score=0.50, pcr_score=None)
+        assert classify_signal(d) == "bullish"
+
+class TestConfidence:
+    def test_range_15_100(self):
+        from deribit import compute_confidence
+        c = compute_confidence(strength=1.0, agreement=1.0, data_quality=1.0,
+                               liquidity=1.0, dvol_mod=1.0, ts_mod=1.0)
+        assert 15 <= c <= 100
+
+    def test_min_confidence_15(self):
+        from deribit import compute_confidence
+        c = compute_confidence(strength=0.0, agreement=0.0, data_quality=0.0,
+                               liquidity=0.0, dvol_mod=0.5, ts_mod=0.5)
+        assert c == 15
+
+    def test_stale_reduces_confidence(self):
+        from deribit import compute_confidence
+        fresh = compute_confidence(strength=0.5, agreement=1.0, data_quality=1.0,
+                                    liquidity=0.5, dvol_mod=1.0, ts_mod=1.0)
+        stale = compute_confidence(strength=0.5, agreement=1.0, data_quality=0.25,
+                                    liquidity=0.5, dvol_mod=1.0, ts_mod=1.0)
+        assert fresh > stale
+
+    def test_stress_modifiers_reduce(self):
+        from deribit import compute_confidence
+        calm = compute_confidence(strength=0.5, agreement=1.0, data_quality=1.0,
+                                   liquidity=0.5, dvol_mod=1.0, ts_mod=1.0)
+        stress = compute_confidence(strength=0.5, agreement=1.0, data_quality=1.0,
+                                     liquidity=0.5, dvol_mod=0.5, ts_mod=0.5)
+        assert calm > stress
+
+    def test_double_extreme_not_crushed(self):
+        from deribit import compute_confidence
+        c = compute_confidence(strength=1.0, agreement=1.0, data_quality=1.0,
+                               liquidity=1.0, dvol_mod=0.5, ts_mod=0.5)
+        assert c >= 40

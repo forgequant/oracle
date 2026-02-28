@@ -139,6 +139,40 @@ def _filter_options(
     return result
 
 
+def _find_25d_iv(
+    options: list[dict],
+    target_delta: float = 0.25,
+    option_type: str = "C",
+) -> tuple[float | None, bool]:
+    """Find IV at 25-delta via interpolation. Returns (iv, was_interpolated)."""
+    if not options:
+        return None, False
+    typed = [o for o in options if o["option_type"] == option_type]
+    if not typed:
+        return None, False
+
+    enriched = []
+    for o in typed:
+        call_d = black76_delta(o["F"], o["strike"], o["T"], o["iv_decimal"])
+        delta = abs(call_d - 1.0) if option_type == "P" else call_d
+        enriched.append({**o, "_delta": delta})
+
+    enriched.sort(key=lambda o: o["_delta"])
+
+    below = [o for o in enriched if o["_delta"] <= target_delta]
+    above = [o for o in enriched if o["_delta"] > target_delta]
+
+    if below and above:
+        lo = below[-1]
+        hi = above[0]
+        frac = (target_delta - lo["_delta"]) / (hi["_delta"] - lo["_delta"])
+        iv = lo["iv_decimal"] + frac * (hi["iv_decimal"] - lo["iv_decimal"])
+        return iv, True
+
+    closest = min(enriched, key=lambda o: abs(o["_delta"] - target_delta))
+    return closest["iv_decimal"], False
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

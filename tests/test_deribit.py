@@ -176,3 +176,39 @@ class TestFiltering:
         assert result[0]["iv_decimal"] == pytest.approx(0.55)
         assert result[0]["T"] > 0
         assert result[0]["option_type"] in ("C", "P")
+
+
+class TestDeltaInterp:
+    def test_find_25d_call_iv_interpolated(self):
+        from deribit import _find_25d_iv
+        options = [
+            {"strike": 55000, "iv_decimal": 0.62, "option_type": "C", "F": 50000, "T": 30/365, "oi": 100},
+            {"strike": 57000, "iv_decimal": 0.65, "option_type": "C", "F": 50000, "T": 30/365, "oi": 100},
+            {"strike": 60000, "iv_decimal": 0.70, "option_type": "C", "F": 50000, "T": 30/365, "oi": 100},
+        ]
+        iv, interpolated = _find_25d_iv(options, target_delta=0.25, option_type="C")
+        assert iv is not None
+        assert isinstance(iv, float)
+
+    def test_find_25d_put_iv(self):
+        from deribit import _find_25d_iv
+        options = [
+            {"strike": 42000, "iv_decimal": 0.68, "option_type": "P", "F": 50000, "T": 30/365, "oi": 100},
+            {"strike": 45000, "iv_decimal": 0.63, "option_type": "P", "F": 50000, "T": 30/365, "oi": 100},
+            {"strike": 48000, "iv_decimal": 0.58, "option_type": "P", "F": 50000, "T": 30/365, "oi": 100},
+        ]
+        iv, interpolated = _find_25d_iv(options, target_delta=0.25, option_type="P")
+        assert iv is not None
+
+    def test_no_bracketing_pair_returns_closest(self):
+        from deribit import _find_25d_iv
+        options = [
+            {"strike": 55000, "iv_decimal": 0.62, "option_type": "C", "F": 50000, "T": 30/365, "oi": 100},
+        ]
+        iv, interpolated = _find_25d_iv(options, target_delta=0.25, option_type="C")
+        assert interpolated is False
+
+    def test_empty_options_returns_none(self):
+        from deribit import _find_25d_iv
+        iv, interpolated = _find_25d_iv([], target_delta=0.25, option_type="C")
+        assert iv is None

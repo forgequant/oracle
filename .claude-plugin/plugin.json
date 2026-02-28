@@ -1,0 +1,18 @@
+{
+  "name": "oracle",
+  "description": "On-chain and macro data signals for crypto trading — options volatility, exchange flows, prediction markets.",
+  "version": "0.1.0",
+  "author": {
+    "name": "forgequant"
+  },
+  "homepage": "https://github.com/forgequant/oracle",
+  "repository": "https://github.com/forgequant/oracle",
+  "license": "MIT",
+  "keywords": ["trading", "options", "volatility", "crypto", "deribit", "on-chain", "macro"],
+  "risk_level": "low",
+  "permissions": ["network"],
+  "api_keys": {
+    "required": [],
+    "optional": []
+  }
+}

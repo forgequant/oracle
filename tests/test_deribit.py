@@ -212,3 +212,52 @@ class TestDeltaInterp:
         from deribit import _find_25d_iv
         iv, interpolated = _find_25d_iv([], target_delta=0.25, option_type="C")
         assert iv is None
+
+
+class TestSkew:
+    def test_rr25_basic(self):
+        from deribit import compute_rr25
+        rr25 = compute_rr25(call_25d_iv=0.55, put_25d_iv=0.62)
+        assert rr25 == pytest.approx(-7.0)
+
+    def test_rr25_positive(self):
+        from deribit import compute_rr25
+        rr25 = compute_rr25(call_25d_iv=0.65, put_25d_iv=0.60)
+        assert rr25 == pytest.approx(5.0)
+
+    def test_rr25_none_when_missing(self):
+        from deribit import compute_rr25
+        assert compute_rr25(None, 0.60) is None
+        assert compute_rr25(0.55, None) is None
+
+class TestPCR:
+    def test_pcr_basic(self):
+        from deribit import compute_pcr
+        options = [
+            {"option_type": "P", "oi": 100, "contract_size": 1.0, "F": 50000, "_delta": 0.30},
+            {"option_type": "C", "oi": 200, "contract_size": 1.0, "F": 50000, "_delta": 0.30},
+        ]
+        pcr = compute_pcr(options)
+        assert pcr == pytest.approx(0.5)
+
+    def test_pcr_excludes_tail_delta(self):
+        from deribit import compute_pcr
+        options = [
+            {"option_type": "P", "oi": 1000, "contract_size": 1.0, "F": 50000, "_delta": 0.05},
+            {"option_type": "P", "oi": 100, "contract_size": 1.0, "F": 50000, "_delta": 0.30},
+            {"option_type": "C", "oi": 100, "contract_size": 1.0, "F": 50000, "_delta": 0.30},
+        ]
+        pcr = compute_pcr(options, delta_min=0.10, delta_max=0.90)
+        assert pcr == pytest.approx(1.0)
+
+    def test_pcr_zero_call_oi_returns_none(self):
+        from deribit import compute_pcr
+        options = [
+            {"option_type": "P", "oi": 100, "contract_size": 1.0, "F": 50000, "_delta": 0.30},
+        ]
+        pcr = compute_pcr(options)
+        assert pcr is None
+
+    def test_pcr_empty_returns_none(self):
+        from deribit import compute_pcr
+        assert compute_pcr([]) is None

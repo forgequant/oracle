@@ -173,6 +173,34 @@ def _find_25d_iv(
     return closest["iv_decimal"], False
 
 
+def enrich_with_deltas(options: list[dict]) -> list[dict]:
+    """Add _delta (call delta magnitude) to each option. Returns NEW list, no mutation."""
+    result = []
+    for o in options:
+        call_d = black76_delta(o["F"], o["strike"], o["T"], o["iv_decimal"])
+        delta = abs(call_d - 1.0) if o["option_type"] == "P" else call_d
+        result.append({**o, "_delta": delta})
+    return result
+
+def compute_rr25(call_25d_iv: float | None, put_25d_iv: float | None) -> float | None:
+    if call_25d_iv is None or put_25d_iv is None:
+        return None
+    return round((call_25d_iv - put_25d_iv) * 100, 2)
+
+def compute_pcr(
+    options: list[dict],
+    delta_min: float = 0.10,
+    delta_max: float = 0.90,
+) -> float | None:
+    """Notional Put/Call Ratio. Options MUST have _delta key (use enrich_with_deltas first)."""
+    filtered = [o for o in options if "_delta" in o and delta_min <= o["_delta"] <= delta_max]
+    put_notional = sum(o["oi"] * o["contract_size"] * o["F"] for o in filtered if o["option_type"] == "P")
+    call_notional = sum(o["oi"] * o["contract_size"] * o["F"] for o in filtered if o["option_type"] == "C")
+    if call_notional == 0:
+        return None
+    return round(put_notional / call_notional, 4)
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

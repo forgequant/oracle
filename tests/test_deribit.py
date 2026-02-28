@@ -115,6 +115,38 @@ class TestFetch:
         assert result == {"ok": True}
         assert mock_urlopen_fn.call_count == 2
 
+    @patch("urllib.request.urlopen")
+    def test_fetch_retries_on_html_response(self, mock_urlopen_fn):
+        """If Deribit returns HTML (502 page), json.JSONDecodeError should trigger retry."""
+        html_resp = MagicMock()
+        html_resp.read.return_value = b"<html>502 Bad Gateway</html>"
+        html_resp.__enter__ = lambda s: s
+        html_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen_fn.side_effect = [
+            html_resp,
+            _mock_urlopen(_make_jsonrpc_response({"ok": True})),
+        ]
+        from deribit import _fetch_deribit
+        result = _fetch_deribit("/public/test", {})
+        assert result == {"ok": True}
+        assert mock_urlopen_fn.call_count == 2
+
+    @patch("urllib.request.urlopen")
+    def test_fetch_retries_on_missing_result_key(self, mock_urlopen_fn):
+        """If Deribit returns valid JSON but no 'result' key, KeyError should trigger retry."""
+        bad_resp = MagicMock()
+        bad_resp.read.return_value = json.dumps({"jsonrpc": "2.0", "id": 1}).encode()
+        bad_resp.__enter__ = lambda s: s
+        bad_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen_fn.side_effect = [
+            bad_resp,
+            _mock_urlopen(_make_jsonrpc_response({"ok": True})),
+        ]
+        from deribit import _fetch_deribit
+        result = _fetch_deribit("/public/test", {})
+        assert result == {"ok": True}
+        assert mock_urlopen_fn.call_count == 2
+
 
 def _make_instrument(name: str, expiry_ts: int, strike: float, contract_size: float = 1.0) -> dict:
     return {
@@ -524,19 +556,23 @@ class TestEndToEnd:
         ])
         mock_urlopen_fn.side_effect = lambda *a, **kw: next(responses)
 
-        sys.argv = ["deribit", "--asset", "BTC"]
+        monkeypatch.setattr("sys.argv", ["deribit", "--asset", "BTC"])
         from deribit import main
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 0
 
-        out = capsys.readouterr().out.strip()
+        captured = capsys.readouterr()
+        out = captured.out.strip()
         result = json.loads(out)
         assert result["schema"] == "signal/v1"
         assert result["signal"] in ("bullish", "bearish", "neutral")
         assert 15 <= result["confidence"] <= 100
         assert "asset" in result["data"]
         assert result["data"]["asset"] == "BTC"
+        # Fix #2: verify human-readable summary goes to stderr
+        assert "BTC" in captured.err
+        assert result["signal"] in captured.err
 
     @patch("time.sleep")
     @patch("urllib.request.urlopen")
@@ -553,7 +589,7 @@ class TestEndToEnd:
 
         mock_urlopen_fn.side_effect = urllib.error.URLError("offline")
 
-        sys.argv = ["deribit", "--asset", "BTC"]
+        monkeypatch.setattr("sys.argv", ["deribit", "--asset", "BTC"])
         from deribit import main
         with pytest.raises(SystemExit) as exc:
             main()
@@ -583,7 +619,7 @@ class TestEndToEnd:
             return _e2e_mock_urlopen(_e2e_jsonrpc_response(_eth_responses[call_count - 4]))
 
         mock_urlopen_fn.side_effect = side_effect
-        sys.argv = ["deribit", "--asset", "both"]
+        monkeypatch.setattr("sys.argv", ["deribit", "--asset", "both"])
         from deribit import main
         with pytest.raises(SystemExit) as exc:
             main()

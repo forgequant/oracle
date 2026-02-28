@@ -18,6 +18,7 @@ import random
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -85,7 +86,7 @@ def black76_delta(F: float, K: float, T: float, iv: float) -> float:
 
 def _fetch_deribit(method: str, params: dict[str, Any] | None = None) -> Any:
     """Fetch from Deribit public API with retry. Returns result from JSON-RPC."""
-    qs = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+    qs = urllib.parse.urlencode(params or {})
     url = f"{BASE_URL}{method}" + (f"?{qs}" if qs else "")
     last_err: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
@@ -95,7 +96,7 @@ def _fetch_deribit(method: str, params: dict[str, Any] | None = None) -> Any:
             if "error" in body:
                 raise ConnectionError(f"Deribit API error: {body['error'].get('message', body['error'])}")
             return body["result"]
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, KeyError) as e:
             last_err = e
             if attempt < MAX_RETRIES:
                 time.sleep(min(4, 0.3 * 2**attempt + random.uniform(0, 0.1)))
@@ -398,7 +399,9 @@ def main():
     for asset in assets:
         try:
             result = process_asset(asset, cache_dir=args.cache_dir or CACHE_DIR, no_cache=args.no_cache)
-            SignalOutput(**result).emit()
+            out = SignalOutput(**result)
+            out.emit()
+            out.summary(result["reasoning"])
             successes += 1
         except Exception as e:
             ErrorOutput(error=f"{asset}: {e}").emit(exit=False)

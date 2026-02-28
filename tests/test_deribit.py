@@ -424,3 +424,16 @@ class TestCache:
         _save_cache({"a": 1}, path=path)
         assert not (path.with_suffix(".tmp")).exists()
         assert path.exists()
+
+
+class TestCLI:
+    def test_default_args(self):
+        from deribit import build_parser
+        args = build_parser().parse_args([])
+        assert args.asset == "BTC"
+        assert args.no_cache is False
+
+    def test_asset_both(self):
+        from deribit import build_parser
+        args = build_parser().parse_args(["--asset", "both"])
+        assert args.asset == "both"

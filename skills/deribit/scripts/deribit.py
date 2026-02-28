@@ -321,6 +321,18 @@ def _freshness_factor(cache_ts: float) -> float:
     return 0.15
 
 
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Deribit options volatility — sentiment signal",
+        prog="deribit",
+    )
+    p.add_argument("--asset", choices=["BTC", "ETH", "both"], default="BTC")
+    p.add_argument("--cache-dir", type=Path, default=None)
+    p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--verbose", action="store_true")
+    return p
+
+
 def main() -> None:
     ErrorOutput(error="not implemented").emit()
 

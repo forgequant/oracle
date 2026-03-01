@@ -10,6 +10,15 @@ Version: 0.1.0 (alpha) | Author: forgequant | License: MIT
 
 Oracle is a Claude Code plugin that surfaces structured volatility signals from crypto options markets. The current implementation focuses on Deribit options data: implied volatility skew, put/call ratio, DVOL index, and term structure shape. Signals are emitted as `signal/v1` JSON to stdout and are designed to compose with other plugins in the forgequant stack.
 
+## Install
+
+<!-- INSTALL:START — auto-synced from emporium/INSTALL_REFERENCE.md -->
+```bash
+claude plugin marketplace add heurema/emporium
+claude plugin install oracle@emporium
+```
+<!-- INSTALL:END -->
+
 ## Quick Start
 
 Ask Claude about options volatility — the `deribit` skill triggers automatically:

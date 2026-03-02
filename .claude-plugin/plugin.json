@@ -9,9 +9,6 @@
   "repository": "https://github.com/forgequant/oracle",
   "license": "MIT",
   "keywords": ["trading", "options", "volatility", "crypto", "deribit", "on-chain", "macro"],
-  "status": "alpha",
-  "owner": "forgequant",
-  "tags": ["trading", "on-chain", "macro"],
   "risk_level": "low",
   "permissions": ["network"],
   "api_keys": {

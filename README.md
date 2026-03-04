@@ -1,27 +1,49 @@
 # Oracle
 
-**On-chain and macro data signals for crypto trading — options volatility, exchange flows, prediction markets.**
+<div align="center">
 
-Version: 0.1.0 (alpha) | Author: forgequant | License: MIT
+**Surface volatility signals from crypto options markets**
 
----
+![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-5b21b6?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.1.0-5b21b6?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-5b21b6?style=flat-square)
 
-## Overview
+```bash
+claude plugin marketplace add heurema/emporium
+claude plugin install oracle@emporium
+```
 
-Oracle is a Claude Code plugin that surfaces structured volatility signals from crypto options markets. The current implementation focuses on Deribit options data: implied volatility skew, put/call ratio, DVOL index, and term structure shape. Signals are emitted as `signal/v1` JSON to stdout and are designed to compose with other plugins in the forgequant stack.
+</div>
+
+## What it does
+
+Crypto options markets encode trader positioning and volatility expectations, but the raw data requires significant computation to interpret. Oracle fetches Deribit public API data and computes a structured set of volatility signals — IV skew, put/call ratio, DVOL regime, and term structure shape — then emits them as `signal/v1` JSON compatible with the forgequant plugin stack. Unlike generic market data tools, Oracle applies a weighted confidence model that degrades signal quality under high-volatility or low-liquidity conditions.
 
 ## Install
 
-<!-- INSTALL:START — auto-synced from emporium/INSTALL_REFERENCE.md -->
+<!-- INSTALL:START -->
 ```bash
 claude plugin marketplace add heurema/emporium
 claude plugin install oracle@emporium
 ```
 <!-- INSTALL:END -->
 
-## Quick Start
+<details>
+<summary>Manual install from source</summary>
 
-Ask Claude about options volatility — the `deribit` skill triggers automatically:
+```bash
+git clone https://github.com/forgequant/oracle
+cd oracle
+claude plugin install .
+```
+
+Python 3.14 and `uv` are required. Dependencies are declared inline (PEP 723) and resolved automatically by `uv run`.
+
+</details>
+
+## Quick start
+
+Ask Claude about options volatility — the `deribit` command triggers automatically:
 
 ```
 What does BTC options skew look like right now?
@@ -37,19 +59,15 @@ Or invoke directly:
 /deribit --asset both
 ```
 
-## Skills
+## Commands
 
-| Skill | Trigger | Description |
-|-------|---------|-------------|
+| Command | Trigger | Description |
+|---------|---------|-------------|
 | `deribit` | Options volatility, IV skew, DVOL, put/call ratio | Fetches Deribit options data and computes volatility signals |
 
-## Requirements
+## Features
 
-- **API keys:** None. Deribit public API is free and unauthenticated.
-- **Network:** Yes — connects to the Deribit public API.
-- **Runtime:** Python 3.14 via `uv run` (PEP 723 inline dependencies, no manual install needed).
-
-## Signals Computed
+**Signals computed**
 
 | Signal | Formula | Interpretation |
 |--------|---------|----------------|
@@ -58,11 +76,9 @@ Or invoke directly:
 | DVOL modifier | Volatility regime factor | High DVOL reduces confidence |
 | Term structure ratio | `front_ATM_IV / back_ATM_IV` | Backwardation reduces confidence |
 
-Weighted direction score: `0.55 * skew_score + 0.45 * pcr_score`
+Direction score: `0.55 * skew_score + 0.45 * pcr_score`. Confidence: `0.40 * strength + 0.25 * agreement + 0.25 * data_quality + 0.10 * liquidity`, scaled by `min(dvol_modifier, ts_modifier)`. Range: [15, 100].
 
-Confidence formula: `0.40 * strength + 0.25 * agreement + 0.25 * data_quality + 0.10 * liquidity`, scaled by `min(dvol_modifier, ts_modifier)`. Range: [15, 100].
-
-## Output Format
+**Output format**
 
 Signal protocol `signal/v1` — JSON to stdout, human summary to stderr:
 
@@ -72,14 +88,14 @@ Signal protocol `signal/v1` — JSON to stdout, human summary to stderr:
   "signal": "bullish",
   "confidence": 62,
   "reasoning": "BTC RR25=5.2, PCR=0.85, DVOL=48 — bullish skew with moderate conviction",
-  "data": { ... },
-  "analytics": { ... }
+  "data": { "..." : "..." },
+  "analytics": { "..." : "..." }
 }
 ```
 
-## Caching
+**Caching**
 
-Snapshots are written atomically to `~/.cache/oracle/deribit/snapshot_{asset}.json`. Freshness decay:
+Snapshots are written atomically to `~/.cache/oracle/deribit/snapshot_{asset}.json`. Confidence degrades with snapshot age:
 
 | Age | Quality multiplier |
 |-----|-------------------|
@@ -91,26 +107,24 @@ Snapshots are written atomically to `~/.cache/oracle/deribit/snapshot_{asset}.js
 
 Use `--no-cache` to force a fresh fetch.
 
-## CLI Reference
+CLI options: `--asset BTC|ETH|both`, `--cache-dir PATH`, `--no-cache`, `--verbose`.
 
-```bash
-uv run skills/deribit/scripts/deribit.py --asset BTC
-uv run skills/deribit/scripts/deribit.py --asset both --no-cache
-uv run skills/deribit/scripts/deribit.py --asset ETH --verbose --cache-dir /tmp/oracle
-```
+## Requirements
 
-Options: `--asset BTC|ETH|both`, `--cache-dir PATH`, `--no-cache`, `--verbose`
+- No API keys. Deribit public API is free and unauthenticated.
+- Network access required — see Privacy.
+- Python 3.14 via `uv run` (PEP 723 inline dependencies, no manual install needed).
 
-## Testing
+## Privacy
 
-```bash
-python3 -m pytest tests/ -v
-```
+Oracle makes outbound network requests to `api.deribit.com` each time a signal is computed. No data is sent to any third party other than Deribit. Responses are cached locally at `~/.cache/oracle/`. No telemetry is collected by this plugin.
 
-## Status
+## See also
 
-Alpha. Only the `deribit` skill is implemented. Exchange flows and prediction market integrations are planned for future releases.
+- [skill7.dev](https://skill7.dev) — plugin registry and docs
+- [emporium](https://github.com/heurema/emporium) — forgequant plugin marketplace
+- [sentinel](https://github.com/forgequant/sentinel) — alert plugin, composes with Oracle signals
 
----
+## License
 
-> This plugin provides data signals for informational purposes only. It does not constitute financial advice. Past performance does not indicate future results. Always do your own research before making trading decisions.
+[MIT](LICENSE)
